@@ -1,0 +1,141 @@
+@model ProfileDetailsViewModel
+
+@* ============================================================================
+   A PARTIAL VIEW.
+
+   Django: {% include "users/_profile_card.html" with profile=p %}
+
+   The difference is the @model line. An {% include %} inherits the parent's
+   context and silently renders nothing for a name that does not exist. A
+   partial declares its type, so <partial name="_ProfileCard" model="x" />
+   with the wrong type is a build error.
+
+   Lives in Views/Shared/ so any controller's views can find it. A partial in
+   Views/Profile/ would only be visible to ProfileController's views — that is
+   the whole of MVC's view-resolution convention, and Django's equivalent is
+   just "whatever path you type into {% include %}".
+   ============================================================================ *@
+
+<div class="card shadow-sm">
+    <div class="card-header d-flex align-items-center">
+        <strong class="me-auto">@Model.DisplayName</strong>
+        @if (Model.IsValidated)
+        {
+            <span class="badge text-bg-success">Validated</span>
+        }
+        else
+        {
+            <span class="badge text-bg-secondary">Pending validation</span>
+        }
+    </div>
+
+    <div class="card-body">
+        <div class="row g-4">
+            <div class="col-auto">
+                @* ------------------------------------------------------------
+                   INITIALS ONLY, NEVER THE UPLOADED IMAGE — and that is a
+                   lesson, not an omission.
+
+                   Model.ProfileImage holds something like
+                   "/uploads/avatars/abc.png". That path is relative to the
+                   BLAZOR app's wwwroot. The two apps share a database; they do
+                   not share a filesystem. Rendering that src here would 404.
+
+                   This is exactly why Django keeps MEDIA_ROOT out of the
+                   database and why any real deployment puts uploads in object
+                   storage behind a URL both apps can reach. A shared database
+                   buys you shared rows, not shared files.
+                   ------------------------------------------------------------ *@
+                <div class="rounded-circle d-inline-flex align-items-center justify-content-center border bg-body-secondary text-body-secondary"
+                     style="width:96px;height:96px;font-size:38px;font-weight:600;"
+                     aria-hidden="true">@Initials()</div>
+            </div>
+
+            <div class="col">
+                <h2 class="h5 mb-1">
+                    @if (Model.Title is not null)
+                    {
+                        <span class="text-body-secondary">@Model.Title.</span>
+                    }
+                    @Model.FullName
+                </h2>
+
+                @if (!string.IsNullOrWhiteSpace(Model.Position) || !string.IsNullOrWhiteSpace(Model.Institution))
+                {
+                    <p class="text-body-secondary mb-2">
+                        @Model.Position@(string.IsNullOrWhiteSpace(Model.Institution) ? "" : $" — {Model.Institution}")
+                    </p>
+                }
+
+                <dl class="row mb-0 small">
+                    <dt class="col-sm-4">Email</dt>
+                    <dd class="col-sm-8">
+                        @Model.Email
+                        @if (!Model.EmailConfirmed)
+                        {
+                            <span class="badge text-bg-warning ms-1">unconfirmed</span>
+                        }
+                    </dd>
+
+                    @if (Model.DateBirth is { } dob)
+                    {
+                        <dt class="col-sm-4">Date of birth</dt>
+                        @* ToString("d") formats per the request's culture,
+                           the way {{ value|date }} follows USE_L10N. *@
+                        <dd class="col-sm-8">@dob.ToString("d")</dd>
+                    }
+
+                    @if (!string.IsNullOrWhiteSpace(Model.PlaceBirth))
+                    {
+                        <dt class="col-sm-4">Place of birth</dt>
+                        <dd class="col-sm-8">@Model.PlaceBirth</dd>
+                    }
+
+                    @if (!string.IsNullOrWhiteSpace(Model.City) || !string.IsNullOrWhiteSpace(Model.Country))
+                    {
+                        <dt class="col-sm-4">Location</dt>
+                        <dd class="col-sm-8">
+                            @Model.City@(string.IsNullOrWhiteSpace(Model.Country) ? "" : $" ({Model.Country})")
+                        </dd>
+                    }
+
+                    @if (!string.IsNullOrWhiteSpace(Model.Nationality))
+                    {
+                        <dt class="col-sm-4">Nationality</dt>
+                        <dd class="col-sm-8">@Model.Nationality</dd>
+                    }
+
+                    @if (Model.Gender is not null)
+                    {
+                        <dt class="col-sm-4">Gender</dt>
+                        <dd class="col-sm-8">@Model.Gender</dd>
+                    }
+                </dl>
+
+                @if (!string.IsNullOrWhiteSpace(Model.Biography))
+                {
+                    <hr />
+                    @* Razor HTML-encodes by default, exactly like Django's
+                       autoescape. The opt-out is @Html.Raw(...), which is
+                       |safe — same XSS risk, so not used here. *@
+                    <p class="mb-0" style="white-space: pre-wrap">@Model.Biography</p>
+                }
+            </div>
+        </div>
+    </div>
+</div>
+
+@* A local function inside a view. Django templates cannot define logic at all —
+   you would write a custom template filter in templatetags/ instead. *@
+@functions {
+    private string Initials()
+    {
+        var initials = string.Concat(
+            Model.FirstName is { Length: > 0 } f ? f[0].ToString() : "",
+            Model.LastName is { Length: > 0 } l ? l[0].ToString() : "");
+
+        return initials.Length > 0
+            ? initials.ToUpperInvariant()
+            : Model.Email is { Length: > 0 } e ? e[0].ToString().ToUpperInvariant() : "?";
+    }
+}

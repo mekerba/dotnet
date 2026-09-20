@@ -1,0 +1,171 @@
+@model ProfileEditViewModel
+@{
+    ViewData["Title"] = "Edit profile";
+
+    // ------------------------------------------------------------------
+    // The built-in helper is Html.GetEnumSelectList<Title>(), and it works —
+    // but it emits the enum's ORDINAL as the option value:
+    //
+    //     <option value="0">Mr</option>
+    //
+    // Model binding accepts an ordinal, so the round trip succeeds. The
+    // problem is that the value on the wire then disagrees with the value in
+    // the database: ProfileConfiguration maps these with
+    // .HasConversion<string>(), so the column holds 'Mr', not 0. And if
+    // someone ever reorders the enum, a cached page would post an ordinal that
+    // now means something else.
+    //
+    // Building the list from the NAMES keeps form, model and column saying the
+    // same thing. Django's TextChoices gives you this for free — the value side
+    // of the tuple is what goes into both the <option> and the column.
+    //
+    // Computed here rather than inline in asp-items="..." because Razor's
+    // parser dislikes generic angle brackets inside an attribute value.
+    // ------------------------------------------------------------------
+    var titleOptions = Enum.GetValues<Title>()
+        .Select(t => new SelectListItem(t.ToString(), t.ToString()));
+
+    var genderOptions = Enum.GetValues<Gender>()
+        .Select(g => new SelectListItem(g.ToString(), g.ToString()));
+}
+
+@* ============================================================================
+   Django: users/profile_form.html
+
+   The GET and POST branches are two separate actions on ProfileController,
+   both rendering THIS one view:
+
+     GET  /Profile/Edit  -> View(ProfileEditViewModel.FromEntity(profile))
+     POST /Profile/Edit  -> if (!ModelState.IsValid) return View(model);
+
+   which is Django's single view with `if request.method == "POST"`, split in
+   two. The template is shared either way, exactly as in Django.
+   ============================================================================ *@
+
+<h1>@ViewData["Title"]</h1>
+
+<div class="row">
+    <div class="col-lg-8">
+        <form asp-controller="Profile" asp-action="Edit" method="post">
+
+            @* Django: {{ form.non_field_errors }} *@
+            <div asp-validation-summary="ModelOnly" class="text-danger" role="alert"></div>
+
+            <fieldset class="mb-4">
+                <legend class="h6 text-uppercase text-body-secondary">Identity</legend>
+                <div class="row g-3">
+
+                    <div class="col-sm-3">
+                        <label asp-for="Title" class="form-label"></label>
+                        @* asp-items supplies the options; the empty <option>
+                           maps to null, which is Django's "---------". *@
+                        <select asp-for="Title" asp-items="titleOptions" class="form-select">
+                            <option value="">&mdash;</option>
+                        </select>
+                        <span asp-validation-for="Title" class="text-danger"></span>
+                    </div>
+
+                    <div class="col-sm-4">
+                        <label asp-for="FirstName" class="form-label"></label>
+                        <input asp-for="FirstName" class="form-control" />
+                        @* Django: {{ form.first_name.errors }} *@
+                        <span asp-validation-for="FirstName" class="text-danger"></span>
+                    </div>
+
+                    <div class="col-sm-5">
+                        <label asp-for="LastName" class="form-label"></label>
+                        <input asp-for="LastName" class="form-control" />
+                        <span asp-validation-for="LastName" class="text-danger"></span>
+                    </div>
+
+                    <div class="col-sm-4">
+                        <label asp-for="Gender" class="form-label"></label>
+                        <select asp-for="Gender" asp-items="genderOptions" class="form-select">
+                            <option value="">&mdash;</option>
+                        </select>
+                        <span asp-validation-for="Gender" class="text-danger"></span>
+                    </div>
+
+                    <div class="col-sm-4">
+                        <label asp-for="DateBirth" class="form-label"></label>
+                        @* type="date" comes from [DataType(DataType.Date)] on
+                           the view model; DateOnly binds straight to it. *@
+                        <input asp-for="DateBirth" class="form-control" />
+                        <span asp-validation-for="DateBirth" class="text-danger"></span>
+                    </div>
+
+                    <div class="col-sm-4">
+                        <label asp-for="PlaceBirth" class="form-label"></label>
+                        <input asp-for="PlaceBirth" class="form-control" />
+                        <span asp-validation-for="PlaceBirth" class="text-danger"></span>
+                    </div>
+                </div>
+            </fieldset>
+
+            <fieldset class="mb-4">
+                <legend class="h6 text-uppercase text-body-secondary">Location</legend>
+                <div class="row g-3">
+                    <div class="col-sm-6">
+                        <label asp-for="City" class="form-label"></label>
+                        <input asp-for="City" class="form-control" />
+                        <span asp-validation-for="City" class="text-danger"></span>
+                    </div>
+
+                    <div class="col-sm-3">
+                        <label asp-for="Country" class="form-label"></label>
+                        <input asp-for="Country" class="form-control text-uppercase" maxlength="2" placeholder="DZ" />
+                        <span asp-validation-for="Country" class="text-danger"></span>
+                    </div>
+
+                    <div class="col-sm-3">
+                        <label asp-for="Nationality" class="form-label"></label>
+                        <input asp-for="Nationality" class="form-control text-uppercase" maxlength="2" placeholder="DZ" />
+                        <span asp-validation-for="Nationality" class="text-danger"></span>
+                    </div>
+                </div>
+            </fieldset>
+
+            <fieldset class="mb-4">
+                <legend class="h6 text-uppercase text-body-secondary">Professional</legend>
+                <div class="row g-3">
+                    <div class="col-sm-6">
+                        <label asp-for="Position" class="form-label"></label>
+                        <input asp-for="Position" class="form-control" />
+                        <span asp-validation-for="Position" class="text-danger"></span>
+                    </div>
+
+                    <div class="col-sm-6">
+                        <label asp-for="Institution" class="form-label"></label>
+                        <input asp-for="Institution" class="form-control" />
+                        <span asp-validation-for="Institution" class="text-danger"></span>
+                    </div>
+
+                    <div class="col-12">
+                        <label asp-for="Biography" class="form-label"></label>
+                        @* <textarea> comes from [DataType(MultilineText)].
+                           Django: widget=forms.Textarea *@
+                        <textarea asp-for="Biography" class="form-control" rows="5"></textarea>
+                        <span asp-validation-for="Biography" class="text-danger"></span>
+                    </div>
+                </div>
+            </fieldset>
+
+            <div class="d-flex gap-2">
+                <button type="submit" class="btn btn-primary">Save changes</button>
+                <a class="btn btn-outline-secondary" asp-controller="Profile" asp-action="Index">Cancel</a>
+            </div>
+        </form>
+    </div>
+
+    <div class="col-lg-4">
+        <div class="alert alert-secondary small">
+            <strong>Not here:</strong> the profile picture. Avatar upload lives in the
+            Blazor app, because uploads need a filesystem and these two apps share
+            only a database. See the note in <code>_ProfileCard.cshtml</code>.
+        </div>
+    </div>
+</div>
+
+@section Scripts {
+    <partial name="_ValidationScriptsPartial" />
+}

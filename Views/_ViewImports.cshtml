@@ -1,0 +1,19 @@
+@* ============================================================================
+   Applies to EVERY view in this folder and below.
+
+   Django: there is no equivalent. Each template repeats its own {% load %}
+   tags, and there is no way to make a `{% load %}` hierarchical.
+
+   @using          -> makes namespaces available, so views can write
+                      `Title.Mr` instead of `Remus.Mvc.Data.Title.Mr`
+   @addTagHelper   -> switches on the asp-* attributes. Without this line,
+                      <form asp-action="Login"> renders literally as an
+                      unknown attribute and silently posts to the current URL.
+                      Django's {% load %} fails loudly; this one fails quietly.
+   ============================================================================ *@
+
+@using Remus.Mvc
+@using Remus.Mvc.Models
+@using Remus.Mvc.Data
+@using Microsoft.AspNetCore.Mvc.Rendering
+@addTagHelper *, Microsoft.AspNetCore.Mvc.TagHelpers

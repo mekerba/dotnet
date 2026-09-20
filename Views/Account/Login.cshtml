@@ -1,0 +1,89 @@
+@model LoginViewModel
+@{
+    ViewData["Title"] = "Sign in";
+}
+
+@* ============================================================================
+   Django: templates/account/login.html
+
+   @model LoginViewModel is the line with NO Django equivalent, and it is the
+   biggest practical difference between the two template systems.
+
+   It declares the type of `Model`. Everything below is therefore
+   COMPILE-CHECKED: @Model.Emial is a build error. In a Django template,
+   {{ form.emial }} renders an empty string and ships to production.
+
+   The cost is rigidity — a Django template can be handed any context dict,
+   and you can pass extra values without touching the template's contract.
+   ============================================================================ *@
+
+<div class="row justify-content-center">
+    <div class="col-md-5">
+        <h1>@ViewData["Title"]</h1>
+        <p class="text-muted">
+            Use the account you created in the Blazor app &mdash; both apps share
+            the same <code>remus_dotnet</code> database.
+        </p>
+
+        @* asp-action/asp-controller build the action URL from the route table.
+           The tag helper ALSO injects the hidden antiforgery field here.
+           Django: <form method="post">{% csrf_token %} *@
+        <form asp-controller="Account" asp-action="Login" asp-route-returnUrl="@ViewData["ReturnUrl"]" method="post">
+
+            @* Django: {{ form.non_field_errors }}
+               "ModelOnly" shows errors added with
+               ModelState.AddModelError(string.Empty, ...) — i.e. form-level
+               errors such as "Incorrect email or password" — and leaves
+               per-field errors to asp-validation-for below.
+               Use "All" to get Django's {{ form.errors }} behaviour. *@
+            <div asp-validation-summary="ModelOnly" class="alert alert-danger d-none-if-empty" role="alert"></div>
+
+            <div class="mb-3">
+                @* asp-for is the workhorse. From the ONE property it generates:
+                     <label for="Email">   with the [Display(Name)] text
+                     name="Email" id="Email"
+                     value="..."           repopulated on redisplay
+                     type="email"          from [EmailAddress]
+                     data-val-required, data-val-email, data-val-*
+                       -> the client-side validation rules
+                   Django: {{ form.email.label_tag }} {{ form.email }} *@
+                <label asp-for="Email" class="form-label"></label>
+                <input asp-for="Email" class="form-control" autocomplete="username" />
+
+                @* Django: {{ form.email.errors }} *@
+                <span asp-validation-for="Email" class="text-danger"></span>
+            </div>
+
+            <div class="mb-3">
+                <label asp-for="Password" class="form-label"></label>
+                @* type="password" comes from [DataType(DataType.Password)] *@
+                <input asp-for="Password" class="form-control" autocomplete="current-password" />
+                <span asp-validation-for="Password" class="text-danger"></span>
+            </div>
+
+            <div class="form-check mb-3">
+                @* asp-for on a bool renders a checkbox AND a hidden field, so
+                   an unchecked box still posts "false". Django's BooleanField
+                   simply treats "absent" as False. *@
+                <input asp-for="RememberMe" class="form-check-input" />
+                <label asp-for="RememberMe" class="form-check-label"></label>
+            </div>
+
+            <button type="submit" class="btn btn-primary w-100">Sign in</button>
+        </form>
+    </div>
+</div>
+
+@* Django: {% block extra_js %}
+
+   _ValidationScriptsPartial pulls in jQuery Unobtrusive Validation, which
+   reads the data-val-* attributes asp-for emitted and validates IN THE BROWSER
+   before the form posts.
+
+   Django has no equivalent in core — validation is server-side only unless you
+   add it yourself. Note that this is a convenience, not a security boundary:
+   ModelState.IsValid on the server is what actually protects you, and it runs
+   whether or not this script loaded. *@
+@section Scripts {
+    <partial name="_ValidationScriptsPartial" />
+}

@@ -1,0 +1,54 @@
+@{
+    ViewData["Title"] = "Home";
+}
+
+<h1>Remus MVC</h1>
+
+<p class="lead">
+    The same login and profile as the Blazor app, rebuilt in <strong>pure ASP.NET Core MVC</strong>
+    &mdash; controllers, <code>.cshtml</code> views, tag helpers &mdash; against the same
+    <code>remus_dotnet</code> database.
+</p>
+
+@if (User.Identity?.IsAuthenticated == true)
+{
+    <p>Signed in as <strong>@User.Identity.Name</strong>.</p>
+    <a class="btn btn-primary" asp-controller="Profile" asp-action="Index">Go to my profile</a>
+}
+else
+{
+    <a class="btn btn-primary" asp-controller="Account" asp-action="Login">Sign in</a>
+}
+
+<hr class="my-4" />
+
+<div class="row g-3">
+    <div class="col-md-6">
+        <div class="card h-100">
+            <div class="card-body">
+                <h2 class="h6">MVC, in Django terms</h2>
+                <table class="table table-sm small mb-0">
+                    <tbody>
+                    <tr><td><code>Controllers/</code></td><td><code>views.py</code></td></tr>
+                    <tr><td><code>Views/*.cshtml</code></td><td><code>templates/*.html</code></td></tr>
+                    <tr><td><code>Models/</code></td><td><code>forms.py</code></td></tr>
+                    <tr><td><code>Data/</code></td><td><code>models.py</code></td></tr>
+                    <tr><td><code>MapControllerRoute</code></td><td><code>urls.py</code></td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-6">
+        <div class="card h-100">
+            <div class="card-body">
+                <h2 class="h6">The vocabulary trap</h2>
+                <p class="small mb-0">
+                    Django's <strong>View</strong> is MVC's <strong>Controller</strong>.
+                    Django's <strong>Template</strong> is MVC's <strong>View</strong>.
+                    Same architecture, swapped words &mdash; see <code>NOTES-MVC.md</code>.
+                </p>
+            </div>
+        </div>
+    </div>
+</div>

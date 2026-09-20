@@ -1,0 +1,130 @@
+@* ============================================================================
+   Django: base.html
+
+     @RenderBody()                       ->  {% block content %}{% endblock %}
+     @RenderSection("Scripts", false)    ->  {% block extra_js %}{% endblock %}
+     ViewData["Title"]                   ->  {{ title }} from the context
+
+   Views do NOT declare which layout they use. Views/_ViewStart.cshtml sets
+   `Layout = "_Layout"` once, for everything. Django is the opposite: every
+   template names its parent with {% extends "base.html" %}.
+
+   Trade: .NET's version means a new view is laid out correctly with zero
+   ceremony; Django's means you can always see the inheritance chain from the
+   file in front of you.
+   ============================================================================ *@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>@ViewData["Title"] - Remus MVC</title>
+
+    @* asp-append-version="true" appends ?v=<content-hash>, so a changed file
+       busts the browser cache. Django: ManifestStaticFilesStorage. *@
+    <link rel="stylesheet" href="~/lib/bootstrap/dist/css/bootstrap.min.css" />
+    <link rel="stylesheet" href="~/css/site.css" asp-append-version="true" />
+</head>
+<body>
+<header>
+    <nav class="navbar navbar-expand-sm navbar-light bg-white border-bottom box-shadow mb-3">
+        <div class="container">
+            @* asp-controller / asp-action generate the href from the ROUTE
+               TABLE rather than a hard-coded string. Change the route template
+               in Program.cs and every link follows.
+
+               Django: {% url 'profile' %} — same idea, but Django resolves by
+               the NAME you gave the path(), whereas MVC resolves by class and
+               method name. Rename ProfileController here and the URL changes;
+               rename a Django view and the {% url %} name still holds. *@
+            <a class="navbar-brand" asp-controller="Home" asp-action="Index">Remus MVC</a>
+
+            <div class="navbar-collapse collapse d-sm-inline-flex justify-content-between">
+                <ul class="navbar-nav flex-grow-1">
+                    @* Django: {% if user.is_authenticated %}
+
+                       `User` in a view is HttpContext.User, the ClaimsPrincipal
+                       built from the auth cookie by UseAuthentication. It is
+                       NOT a database row — see ProfileController.CurrentUserId. *@
+                    @if (User.Identity?.IsAuthenticated == true)
+                    {
+                        <li class="nav-item">
+                            <a class="nav-link text-dark" asp-controller="Profile" asp-action="Index">My profile</a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link text-dark" asp-controller="Profile" asp-action="Edit">Edit profile</a>
+                        </li>
+                    }
+                </ul>
+
+                <ul class="navbar-nav">
+                    @if (User.Identity?.IsAuthenticated == true)
+                    {
+                        <li class="nav-item">
+                            <span class="nav-link text-muted">@User.Identity.Name</span>
+                        </li>
+                        <li class="nav-item">
+                            @* A FORM, not a link: logout must be a POST.
+
+                               The <form asp-action> tag helper injects the
+                               antiforgery hidden field automatically — this is
+                               {% csrf_token %}, except you cannot forget it.
+                               (What you CAN forget is [ValidateAntiForgeryToken]
+                               on the action that receives it.) *@
+                            <form asp-controller="Account" asp-action="Logout" method="post" class="d-inline">
+                                <button type="submit" class="btn btn-link nav-link">Sign out</button>
+                            </form>
+                        </li>
+                    }
+                    else
+                    {
+                        <li class="nav-item">
+                            <a class="nav-link text-dark" asp-controller="Account" asp-action="Login">Sign in</a>
+                        </li>
+                    }
+                </ul>
+            </div>
+        </div>
+    </nav>
+</header>
+
+<div class="container">
+    <main role="main" class="pb-3">
+        @* Django: {% if messages %}{% for message in messages %}
+
+           TempData survives exactly one redirect and is then discarded — which
+           is precisely what django.contrib.messages does, and for the same
+           reason: a POST/REDIRECT/GET loses the response that would have
+           carried the message. *@
+        @if (TempData["Status"] is string status)
+        {
+            <div class="alert alert-success alert-dismissible fade show" role="alert">
+                @status
+                <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+            </div>
+        }
+
+        @RenderBody()
+    </main>
+</div>
+
+<footer class="border-top footer text-muted">
+    <div class="container">
+        <span class="small">
+            Remus MVC &mdash; pure ASP.NET Core MVC against the same
+            <code>remus_dotnet</code> database as the Blazor app.
+        </span>
+    </div>
+</footer>
+
+<script src="~/lib/jquery/dist/jquery.min.js"></script>
+<script src="~/lib/bootstrap/dist/js/bootstrap.bundle.min.js"></script>
+<script src="~/js/site.js" asp-append-version="true"></script>
+
+@* Django: {% block extra_js %}{% endblock %}
+   required:false means a view may omit it. Sections are how a child view
+   injects markup OUTSIDE its own RenderBody slot. *@
+@await RenderSectionAsync("Scripts", required: false)
+</body>
+</html>

@@ -1,0 +1,31 @@
+@model ProfileDetailsViewModel
+@{
+    ViewData["Title"] = "My profile";
+}
+
+@* Django: users/profile.html, rendered by an @login_required view.
+   The protection lives on ProfileController ([Authorize] on the class), not
+   here — a template never decides who may see it. Same in Django. *@
+
+<h1>@ViewData["Title"]</h1>
+
+@if (Model.IsIncomplete)
+{
+    <div class="alert alert-info d-flex align-items-center">
+        <span class="me-auto">Your profile is incomplete &mdash; add your name.</span>
+        <a class="btn btn-sm btn-primary" asp-controller="Profile" asp-action="Edit">Complete it</a>
+    </div>
+}
+
+@* <partial> is the tag-helper form of @await Html.PartialAsync(...).
+   Django: {% include "users/_profile_card.html" with profile=profile %} *@
+<partial name="_ProfileCard" model="Model" />
+
+<div class="mt-3 d-flex gap-2">
+    <a class="btn btn-primary" asp-controller="Profile" asp-action="Edit">Edit profile</a>
+</div>
+
+<p class="text-body-secondary small mt-3">
+    Created @Model.Created.ToLocalTime().ToString("g")
+    &middot; last updated @Model.LastUpdate.ToLocalTime().ToString("g")
+</p>

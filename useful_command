@@ -1,0 +1,126 @@
+# Useful commands — Remus.Mvc
+
+All commands are run from the project root:
+
+    cd /Users/mim/Sites/dotnet_mvc
+
+
+## Running the app
+
+    dotnet run                          # http profile  -> http://localhost:5260
+    dotnet run --launch-profile https   # https profile -> https://localhost:7080
+    dotnet watch                        # run with hot reload on file save
+
+The profiles and their ports are defined in Properties/launchSettings.json.
+Both set ASPNETCORE_ENVIRONMENT=Development.
+
+Stop the app with Ctrl-C.
+
+
+## Build
+
+    dotnet restore      # fetch NuGet packages
+    dotnet build        # compile without running
+    dotnet clean        # wipe bin/ and obj/
+
+
+## HTTPS certificate
+
+Only needed the first time the https profile is used, if the browser or the
+runtime complains about an untrusted certificate:
+
+    dotnet dev-certs https --trust
+
+
+## Secrets (connection string, password)
+
+The Postgres connection string is NOT in the repo. It lives in .NET's
+user-secrets store, keyed by the UserSecretsId in Remus.Mvc.csproj:
+
+    ~/.microsoft/usersecrets/52888986-e459-4a61-88f3-b915cf6c7fd3/secrets.json
+
+which resolves to:
+
+    /Users/mim/.microsoft/usersecrets/52888986-e459-4a61-88f3-b915cf6c7fd3/secrets.json
+
+It is plain, unencrypted JSON kept outside the project directory so it cannot
+be committed. This is a development-only mechanism; in production use
+environment variables or a secrets manager instead.
+
+    dotnet user-secrets list       # show every secret for this project
+    dotnet user-secrets set "ConnectionStrings:DefaultConnection" "Host=localhost;Port=5432;Database=remus_dotnet;Username=postgres;Password=YOUR_PASSWORD"
+    dotnet user-secrets remove "ConnectionStrings:DefaultConnection"
+    dotnet user-secrets clear      # remove all of them
+
+At runtime these merge into IConfiguration on top of appsettings.json, which is
+why GetConnectionString("DefaultConnection") in Program.cs finds the value even
+though appsettings.json has no ConnectionStrings section.
+
+
+## Users and roles
+
+Create an admin user from THIS project (Django: manage.py createsuperuser).
+Prompts for anything not given on the command line:
+
+    dotnet run -- createsuperuser
+    dotnet run -- createsuperuser boss@remus.local
+    dotnet run -- createsuperuser boss@remus.local 'Str0ng!Pass'
+    dotnet run -- createsuperuser boss@remus.local 'Str0ng!Pass' --roles Admin,SysMan
+    dotnet run -- createsuperuser --help
+
+Prefer the prompting form: a password passed as an argument lands in your
+shell history. The command creates the user, confirms its email, creates its
+profile with IsValidated = true, and assigns Admin + SysMan + BasicUser. It
+never starts the web server, and exits 0 on success, 1 on refusal, 2 on bad
+usage.
+
+Passwords must satisfy the rules in Program.cs: at least 8 characters, with an
+uppercase, a lowercase, a digit and a non-alphanumeric character.
+
+Roles are read, never created. They live in the shared AspNetRoles table and
+are seeded by the Blazor app. Known roles: Admin, SysMan, CbtOperator,
+OsiOperator, ScientificOperator, BasicUser.
+
+Inspect who exists and what they hold:
+
+    PGPASSWORD='<password>' psql -h localhost -U postgres -d remus_dotnet -c \
+    'SELECT u."UserName", string_agg(r."Name", '"'"', '"'"') AS roles
+     FROM "AspNetUsers" u
+     LEFT JOIN "AspNetUserRoles" ur ON ur."UserId" = u."Id"
+     LEFT JOIN "AspNetRoles" r ON r."Id" = ur."RoleId"
+     GROUP BY u."UserName" ORDER BY u."UserName";'
+
+Role changes only take effect at the next sign-in: roles are written into the
+auth cookie at login, not read from the database on each request.
+
+Passwords cannot be changed with SQL - the PasswordHash column holds a PBKDF2
+hash that Identity generates.
+
+
+## Database
+
+This project does not own the schema: there is no Migrations folder and
+Database.Migrate() is never called (see the note in Program.cs). The Blazor app
+owns the schema and runs the migrations. These are read-only checks:
+
+    pg_isready                                          # is Postgres up?
+    psql -h localhost -U postgres -l                    # list databases
+    psql -h localhost -U postgres -d remus_dotnet       # open a shell on this database
+
+Inside psql:  \dt  list tables   \d <table>  describe a table   \q  quit
+
+
+## Port conflicts
+
+If a port is already taken ("address already in use"):
+
+    lsof -nP -iTCP:5260 -sTCP:LISTEN     # what is holding the http port
+    lsof -nP -iTCP:7080 -sTCP:LISTEN     # what is holding the https port
+    kill <PID>
+
+
+## Environment check
+
+    dotnet --version        # active SDK version
+    dotnet --list-sdks      # every installed SDK
+    dotnet --info           # full runtime and SDK detail

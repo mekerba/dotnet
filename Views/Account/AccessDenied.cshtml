@@ -1,0 +1,26 @@
+@{
+    ViewData["Title"] = "Access denied";
+}
+
+@* No @model — this view takes no data, so `Model` is not available at all.
+   Django: render(request, "403.html") with an empty context. *@
+
+<div class="row justify-content-center">
+    <div class="col-md-6 text-center">
+        <h1>@ViewData["Title"]</h1>
+        <p class="text-muted">
+            You are signed in, but this page requires a permission your account does not have.
+        </p>
+
+        @* Worth noticing that this page exists at all.
+
+           Django collapses both cases into a redirect to LOGIN_URL, so a
+           logged-in user without permission is bounced to a login form they
+           have already completed — a well-known Django papercut.
+
+           ASP.NET Core distinguishes them: 401 (not signed in) goes to
+           LoginPath, 403 (signed in, not allowed) comes here. Both are
+           configured in ConfigureApplicationCookie. *@
+        <a class="btn btn-outline-secondary" asp-controller="Home" asp-action="Index">Back home</a>
+    </div>
+</div>
