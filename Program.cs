@@ -1,5 +1,7 @@
-﻿using Microsoft.AspNetCore.Identity;
+﻿using System.Text.Json.Serialization;
+using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
+using Remus.Mvc.Api;
 using Remus.Mvc.Commands;
 using Remus.Mvc.Data;
 
@@ -34,6 +36,57 @@ var builder = WebApplication.CreateBuilder(args);
 //
 // Django: nothing to register. TEMPLATES and the URL resolver are always on.
 builder.Services.AddControllersWithViews();
+
+// ---------------------------------------------------------------------------
+// THE API  —  Django: INSTALLED_APPS += ["rest_framework"]
+// ---------------------------------------------------------------------------
+// Everything under /api is served to the Angular app in ../remus-angular. The
+// endpoints live in Api/; this is the whole of their registration.
+//
+// NOTE WHAT IS NOT HERE. No AddControllers(), no second routing system, no
+// separate project, and — apart from the OpenAPI document — no NuGet package.
+// Minimal APIs, model binding, JSON and validation all ship inside
+// Microsoft.NET.Sdk.Web, which this project already used. DRF is a dependency
+// you install; this is not.
+
+// Serves the OpenAPI document at /openapi/v1.json.
+// Django: drf-spectacular. Its real payoff is generating the Angular client.
+builder.Services.AddOpenApi();
+
+// New in .NET 10. Runs the DataAnnotations on a minimal API's body parameter
+// BEFORE the handler is entered, answering 400 + ProblemDetails on failure —
+// so an endpoint never needs the equivalent of ModelState.IsValid.
+// Django: serializer.is_valid(raise_exception=True), except unforgettable.
+builder.Services.AddValidation();
+
+// ===========================================================================
+// TWO JSON CONFIGURATIONS EXIST AND THEY ARE NOT THE SAME OBJECT.
+//
+//   ConfigureHttpJsonOptions                  -> minimal APIs   (Api/)
+//   AddControllersWithViews().AddJsonOptions  -> controllers    (Controllers/)
+//
+// Both default to camelCase, so the two agree right up until the day you
+// configure one and cannot work out why the other ignored you.
+//
+// The converter below is why ProfileDto can declare `Title? Title` and put
+// "Mr" on the wire. Without it System.Text.Json writes an enum as its ORDINAL
+// and the client receives 3. ProfileController.Summary works around that with
+// .ToString() on every enum by hand; this fixes it once, for every endpoint.
+// ===========================================================================
+builder.Services.ConfigureHttpJsonOptions(options =>
+{
+    options.SerializerOptions.Converters.Add(new JsonStringEnumConverter());
+});
+
+// The name of the header the CSRF token may arrive in. ASP.NET would call it
+// "RequestVerificationToken"; Angular's HttpClient sends "X-XSRF-TOKEN" without
+// being asked, so this is the cheaper side to change. (Django's spelling is a
+// third one again: "X-CSRFToken".)
+//
+// This does NOT disturb the .cshtml forms — [ValidateAntiForgeryToken] still
+// reads the hidden __RequestVerificationToken field exactly as before. It only
+// adds a second place the token is allowed to come from.
+builder.Services.AddAntiforgery(options => options.HeaderName = "X-XSRF-TOKEN");
 
 // ---------------------------------------------------------------------------
 // Database
@@ -135,6 +188,51 @@ builder.Services.ConfigureApplicationCookie(options =>
 
     options.ExpireTimeSpan = TimeSpan.FromDays(14);   // Django: SESSION_COOKIE_AGE
     options.SlidingExpiration = true;                 // Django: SESSION_SAVE_EVERY_REQUEST
+
+    // =======================================================================
+    // 401 FOR /api, 302 FOR EVERYTHING ELSE.
+    //
+    // This is the fix for the trap documented at length in
+    // wwwroot/js/profile-edit.js. By default an expired cookie makes the
+    // framework answer a REDIRECT to LoginPath — correct for a browser
+    // following a link, useless for fetch(), which follows the redirect
+    // silently and hands the caller 200 OK carrying an HTML login form where
+    // it expected JSON.
+    //
+    // profile-edit.js defends by sniffing Content-Type. That was the honest
+    // fix available from the client. This is the fix at the source: tell the
+    // framework that /api talks to programs, and a program is owed a status
+    // code rather than a page.
+    //
+    // Django hits this too, and DRF answers it the same way — session
+    // authentication returns 403 instead of the 302 a browser would get,
+    // precisely because an XHR cannot follow a login redirect usefully.
+    // =======================================================================
+    options.Events.OnRedirectToLogin = context =>
+    {
+        if (context.Request.Path.StartsWithSegments(ApiSetup.Prefix))
+        {
+            context.Response.StatusCode = StatusCodes.Status401Unauthorized;
+            return Task.CompletedTask;
+        }
+
+        context.Response.Redirect(context.RedirectUri);
+        return Task.CompletedTask;
+    };
+
+    // The same distinction for "signed in, but not allowed here": 403 rather
+    // than a redirect to AccessDeniedPath.
+    options.Events.OnRedirectToAccessDenied = context =>
+    {
+        if (context.Request.Path.StartsWithSegments(ApiSetup.Prefix))
+        {
+            context.Response.StatusCode = StatusCodes.Status403Forbidden;
+            return Task.CompletedTask;
+        }
+
+        context.Response.Redirect(context.RedirectUri);
+        return Task.CompletedTask;
+    };
 });
 
 // ===========================================================================
@@ -210,6 +308,12 @@ app.UseRouting();
 app.UseAuthentication();   // reads the cookie  -> HttpContext.User
 app.UseAuthorization();    // enforces [Authorize] against that User
 
+// Issues the XSRF-TOKEN cookie on every GET under /api, giving the Angular
+// client a token to echo back on its writes. This is the client half of what
+// the hidden __RequestVerificationToken field does for the .cshtml forms; the
+// server half is AntiforgeryFilter. Both are explained in Api/ApiSetup.cs.
+app.UseApiAntiforgeryCookie();
+
 app.MapStaticAssets();
 
 // ---------------------------------------------------------------------------
@@ -235,6 +339,23 @@ app.MapControllerRoute(
         name: "default",
         pattern: "{controller=Home}/{action=Index}/{id?}")
     .WithStaticAssets();
+
+// ---------------------------------------------------------------------------
+// THE API'S ROUTES  —  Django: path("api/", include("api.urls"))
+// ---------------------------------------------------------------------------
+// The counterpart to MapControllerRoute above, and the contrast IS the lesson.
+// That one call routes every controller by convention, and you cannot tell
+// from reading it which URLs exist. MapApi mounts a list of explicit route
+// strings instead, so Api/ProfileEndpoints.cs reads like urls.py.
+//
+// Both styles are live in this one app, on one port, behind one auth cookie.
+app.MapApi();
+
+// What MapApi just registered, as a machine-readable document:
+//     http://localhost:5260/openapi/v1.json
+// Development only — an OpenAPI document is a map of your attack surface.
+if (app.Environment.IsDevelopment())
+    app.MapOpenApi();
 
 app.Run();
 

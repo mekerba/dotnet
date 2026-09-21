@@ -16,6 +16,11 @@ Both set ASPNETCORE_ENVIRONMENT=Development.
 
 Stop the app with Ctrl-C.
 
+This one app serves BOTH the MVC pages and the JSON API under /api. There is no
+second project to start. If you are working on the Angular client, see "The
+Angular client" below - you run this app AND the Angular dev server, and you
+open the Angular one.
+
 
 ## Build
 
@@ -110,13 +115,176 @@ owns the schema and runs the migrations. These are read-only checks:
 Inside psql:  \dt  list tables   \d <table>  describe a table   \q  quit
 
 
+## The API  (/api)
+
+The same app also answers JSON under /api, for the Angular client in
+../remus-angular. Same port, same process, same .Remus.Mvc.Auth cookie: sign in
+on the MVC pages and the API already knows who you are.
+
+    GET   /api/auth/me       who you are. Anonymous callers get 200, not 401.
+    POST  /api/auth/login    sign in; the response carries the auth cookie
+    POST  /api/auth/logout   clear it
+    GET   /api/profile       the signed-in user's profile
+    PUT   /api/profile       replace its editable fields
+
+The endpoints live in Api/ and are MINIMAL APIs, not controllers - the routes
+are explicit strings in Api/AuthEndpoints.cs and Api/ProfileEndpoints.cs rather
+than being implied by class and method names the way Controllers/ are. The
+comment at the top of Api/ProfileEndpoints.cs compares the two styles.
+
+The machine-readable description of all of it (Development only):
+
+    curl -s http://localhost:5260/openapi/v1.json | python3 -m json.tool
+
+Note it is OpenAPI **3.1.1**. .NET 10 emits 3.1 by default and a fair number of
+client generators still only read 3.0, which produces confusing "unsupported
+version" errors. If you hit one, either pick a generator that handles 3.1 (see
+below) or downgrade the document in Program.cs:
+
+    builder.Services.AddOpenApi(options =>
+        options.OpenApiVersion = Microsoft.OpenApi.OpenApiSpecVersion.OpenApi3_0);
+
+
+### Calling it from the shell
+
+Two things make curl harder than a browser here, and both are deliberate.
+
+  1. Authentication is a COOKIE, so you need a cookie jar: -c writes it,
+     -b sends it.
+  2. Every write needs a CSRF token. A GET under /api issues the XSRF-TOKEN
+     cookie; the write echoes its value back in the X-XSRF-TOKEN header.
+     Angular's HttpClient does this unprompted. curl does not.
+
+    # 1. any GET, to get a jar with a token in it
+    curl -s -c /tmp/remus.jar http://localhost:5260/api/auth/me
+
+    # 2. read the token out of the jar
+    TOKEN=$(awk '/XSRF-TOKEN/ {print $7}' /tmp/remus.jar)
+
+    # 3. sign in - the jar now also holds .Remus.Mvc.Auth
+    curl -s -b /tmp/remus.jar -c /tmp/remus.jar -X POST \
+         http://localhost:5260/api/auth/login \
+         -H 'Content-Type: application/json' \
+         -H "X-XSRF-TOKEN: $TOKEN" \
+         -d '{"email":"admin@remus.local","password":"YOUR_PASSWORD","rememberMe":false}'
+
+    # 4. authenticated calls now work
+    curl -s -b /tmp/remus.jar http://localhost:5260/api/profile | python3 -m json.tool
+
+    # 5. a write
+    curl -s -b /tmp/remus.jar -X PUT http://localhost:5260/api/profile \
+         -H 'Content-Type: application/json' \
+         -H "X-XSRF-TOKEN: $TOKEN" \
+         -d '{"firstName":"Ada","lastName":"Lovelace","country":"dz"}'
+
+Trigger each of these failures once, so you recognise them later:
+
+    400  {"title":"Invalid or missing antiforgery token."}
+             step 1 or 2 was skipped. Api/ApiSetup.cs explains the mechanism.
+
+    400  {"errors":{"FirstName":["First name is required."]}}
+             the body failed validation. Note the key is "FirstName" with a
+             capital F while every other property in every other response is
+             camelCase - see the note in remus-angular's problem-details.ts.
+
+    401  {"title":"Sign-in failed."}
+             wrong credentials. The same answer for a locked-out or
+             unconfirmed account, on purpose - AuthEndpoints.cs says why.
+
+    401  (empty body)
+             not signed in. Compare with the same request to /Profile, which
+             gets 302 to /Account/Login instead:
+
+                 curl -s -o /dev/null -w '%{http_code}\n' http://localhost:5260/api/profile
+                 curl -s -o /dev/null -w '%{http_code}\n' http://localhost:5260/Profile
+
+             401 versus 302 is a deliberate split configured in Program.cs, and
+             it is the fix for the trap documented in wwwroot/js/profile-edit.js.
+
+
+## The Angular client  (../remus-angular)
+
+A second front end over that API. Separate npm project, same level as this one:
+
+    /Users/mim/Sites/
+      dotnet_mvc/       MVC pages + /api     :5260    (this project)
+      remus-angular/    Angular 22           :4200
+      remus_dotnet/     Blazor               :5199    owns the schema
+
+Needs Node. v22.23 is installed here; Angular 22 wants v20.19+ or v22.12+.
+
+### First time
+
+    cd ../remus-angular
+    npm install
+
+That resolves from the existing package-lock.json and takes a few seconds.
+
+If you ever delete the lockfile, the fresh resolve currently crashes npm 10.9.8
+with "Cannot read properties of null (reading 'edgesOut')". It is a bug in
+npm's peer-dependency resolver around vitest, not in Angular. Two ways out:
+
+    npm install --legacy-peer-deps      # skips strict peer resolution
+    npm install -g npm@11               # fixes it properly
+
+The project is not a git repository yet. `git init` there if you want one; it
+is deliberately separate from this repo, the same way remus_dotnet is.
+
+### Day to day - TWO terminals, both running
+
+    # terminal 1 - the API
+    cd /Users/mim/Sites/dotnet_mvc && dotnet watch
+
+    # terminal 2 - the client
+    cd /Users/mim/Sites/remus-angular && npm start
+
+Then open http://localhost:4200 - NOT :5260. The Angular dev server serves the
+page and forwards everything under /api to :5260 (proxy.conf.mjs). Opening
+:5260 gives you the MVC pages, which is the point of keeping both.
+
+Forget terminal 1 and the page loads with "Cannot reach the server" - nothing
+is broken, the proxy simply has nothing to forward to. Start the API and
+reload.
+
+    npm start        ng serve on :4200, hot reload     Django: runserver
+    npm run build    production bundle into dist/
+    npm test         vitest, once
+    npx ng generate component pages/foo                scaffold a component
+
+`ng` is not on the PATH: the CLI is installed per project. Use the npm scripts,
+or `npx ng <anything>`.
+
+### Generating the client instead of hand-writing it
+
+src/app/core/api.models.ts is written by hand as an exercise. When it stops
+teaching you anything, generate it from the OpenAPI document instead - with the
+MVC app running:
+
+    cd ../remus-angular
+    npx ng-openapi-gen --input http://localhost:5260/openapi/v1.json \
+                       --output src/app/api
+
+ng-openapi-gen reads OpenAPI 3.1, which matters (see the note above). It emits
+typed models plus Angular services built on HttpClient. NSwag is the more
+common .NET-shop answer and produces similar output, but its npm package ships
+.NET 8 binaries and there is no .NET 8 runtime on this machine - it fails with
+"You must install or update .NET" until you install one.
+
+A generated client cannot drift from the server. A hand-written one drifts the
+first time somebody renames a C# property, and nothing tells you.
+
+
 ## Port conflicts
 
 If a port is already taken ("address already in use"):
 
     lsof -nP -iTCP:5260 -sTCP:LISTEN     # what is holding the http port
     lsof -nP -iTCP:7080 -sTCP:LISTEN     # what is holding the https port
+    lsof -nP -iTCP:4200 -sTCP:LISTEN     # what is holding the Angular dev server
     kill <PID>
+
+If 5260 is taken, remember that proxy.conf.mjs in the Angular project hard-codes
+it. Moving the API means editing that file too, or every /api call 504s.
 
 
 ## Environment check
@@ -124,3 +292,7 @@ If a port is already taken ("address already in use"):
     dotnet --version        # active SDK version
     dotnet --list-sdks      # every installed SDK
     dotnet --info           # full runtime and SDK detail
+
+    node --version          # Angular 22 needs v20.19+ or v22.12+
+    npm --version
+    npx ng version          # run from ../remus-angular; ng is not global
