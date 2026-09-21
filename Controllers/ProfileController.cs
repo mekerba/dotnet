@@ -1,4 +1,4 @@
-using System.Security.Claims;
+﻿using System.Security.Claims;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -151,6 +151,81 @@ public class ProfileController(
         // successful form — and the reflex transfers unchanged.
         // ================================================================
         return RedirectToAction(nameof(Index));
+    }
+
+    // ------------------------------------------------------------------
+    // GET /Profile/Summary   ->  JSON, for the Edit page's preview modal.
+    // Django: a view that returns JsonResponse.
+    // ------------------------------------------------------------------
+    //
+    // NOTHING NEW IS NEEDED TO SERVE JSON.
+    //
+    // Same Controller base class, same route template, same injected db as the
+    // HTML actions above — only the return type differs. Json(x) sets the
+    // Content-Type and serialises with System.Text.Json. There is no separate
+    // "API project", no [ApiController], no second routing system.
+    //
+    // Three things to know about it:
+    //
+    //   * PROPERTY NAMES ARRIVE camelCase. AddControllersWithViews configures
+    //     System.Text.Json with the web defaults, so FirstName is serialised
+    //     as "firstName". The JavaScript reads the camelCase spelling. This
+    //     catches everyone once.
+    //
+    //   * [Authorize] on the class covers this action too, so it is not
+    //     public. But an EXPIRED cookie produces a 302 to the login page, not
+    //     a 401 — and fetch() follows redirects silently, so the browser gets
+    //     200 OK carrying an HTML login form where it expected JSON. The
+    //     caller in profile-edit.js checks Content-Type for exactly this.
+    //
+    //   * This is a GET, so no antiforgery token is involved. A JSON endpoint
+    //     that WRITES must be [HttpPost] and carry one — see the note at the
+    //     bottom of profile-edit.js.
+    //
+    [HttpGet]
+    public async Task<IActionResult> Summary(CancellationToken ct)
+    {
+        var userId = CurrentUserId;
+
+        // Scoped to the signed-in user, not to an id from the query string.
+        // An endpoint that took ?userId= would let any signed-in visitor read
+        // anyone's profile — the most common way an added AJAX endpoint
+        // quietly becomes a data leak.
+        var profile = await db.Profiles
+            .AsNoTracking()
+            .Include(p => p.User)
+            .FirstOrDefaultAsync(p => p.UserId == userId, ct);
+
+        if (profile is null)
+            return NotFound();
+
+        // Projected explicitly rather than returning the entity, for the same
+        // reason ProfileViewModel exists: serialising a model straight out of
+        // the database publishes every column you later add to it, including
+        // the ones you did not mean to. Django: a ModelSerializer with an
+        // explicit `fields` list rather than `__all__`.
+        //
+        // .ToString() on the enums because System.Text.Json writes an enum as
+        // its ORDINAL by default — the modal would show "0" instead of "Mr".
+        // Done here in memory, after the query, where it is plain C#.
+        return Json(new
+        {
+            Email = profile.User.Email,
+            Title = profile.Title?.ToString(),
+            profile.FirstName,
+            profile.LastName,
+            Gender = profile.Gender?.ToString(),
+            profile.DateBirth,
+            profile.PlaceBirth,
+            profile.City,
+            profile.Country,
+            profile.Nationality,
+            profile.Position,
+            profile.Institution,
+            profile.Biography,
+            profile.IsValidated,
+            profile.LastUpdate,
+        });
     }
 
     /// <summary>

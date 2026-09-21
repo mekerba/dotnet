@@ -1,4 +1,4 @@
-@model ProfileEditViewModel
+﻿@model ProfileEditViewModel
 @{
     ViewData["Title"] = "Edit profile";
 
@@ -153,6 +153,14 @@
             <div class="d-flex gap-2">
                 <button type="submit" class="btn btn-primary">Save changes</button>
                 <a class="btn btn-outline-secondary" asp-controller="Profile" asp-action="Index">Cancel</a>
+
+                @* type="button" MATTERS. A <button> inside a <form> defaults to
+                   type="submit", so without this the preview button would post
+                   the form. Django templates have the identical trap. *@
+                <button type="button" class="btn btn-outline-info ms-auto"
+                        data-bs-toggle="modal" data-bs-target="#profile-preview">
+                    Preview saved profile
+                </button>
             </div>
         </form>
     </div>
@@ -166,6 +174,59 @@
     </div>
 </div>
 
+@* ============================================================================
+   THE MODAL
+
+   Bootstrap's own markup — _Layout already loads bootstrap.bundle.min.js, so
+   data-bs-toggle="modal" on the button opens it with no JavaScript of ours.
+
+   It sits OUTSIDE the <form> on purpose: a modal is moved around the DOM by
+   Bootstrap, and a stray <div> crossing form boundaries is how you end up with
+   fields that silently stop posting.
+
+   The body is empty. Nothing here is rendered by Razor — the server sends this
+   page once, and by the time anyone clicks the button Razor has long finished.
+   The content is fetched and built in the browser; see profile-edit.js.
+
+   data-summary-url is the handoff to that script: Razor cannot run inside a
+   static .js file, so the URL is written into an attribute here. Django would
+   put {% url 'profile-summary' %} in the same place, for the same reason.
+   ============================================================================ *@
+<div class="modal fade" id="profile-preview" tabindex="-1"
+     aria-labelledby="profile-preview-title" aria-hidden="true"
+     data-summary-url="@Url.Action("Summary", "Profile")">
+    <div class="modal-dialog modal-dialog-scrollable modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2 class="modal-title h5" id="profile-preview-title">Saved profile</h2>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+
+            <div class="modal-body" id="profile-preview-body">
+                @* Replaced on every open. The spinner is what the user sees
+                   during the fetch. *@
+                <div class="text-center text-body-secondary py-4">
+                    <div class="spinner-border spinner-border-sm" role="status"></div>
+                    <span class="ms-2">Loading&hellip;</span>
+                </div>
+            </div>
+
+            <div class="modal-footer">
+                <small class="text-body-secondary me-auto">
+                    Shows what is in the database, not your unsaved edits.
+                </small>
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+            </div>
+        </div>
+    </div>
+</div>
+
 @section Scripts {
     <partial name="_ValidationScriptsPartial" />
+
+    @* Django: {% block extra_js %}. Rendered by _Layout at the end of <body>,
+       after jquery and site.js. asp-append-version stamps a content hash onto
+       the URL so a changed file is never served from cache — Django needs
+       ManifestStaticFilesStorage for the same effect. *@
+    <script src="~/js/profile-edit.js" asp-append-version="true"></script>
 }
