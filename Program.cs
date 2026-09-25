@@ -255,7 +255,10 @@ builder.Services.ConfigureApplicationCookie(options =>
 // Nothing is lost — a real failure here throws, and an unhandled exception
 // still prints its stack trace.
 // ===========================================================================
-var isCommand = args is [CreateSuperUser.Verb, ..];
+// Two verbs now, so the pattern lists both. A `default` arm is not needed:
+// anything that is not a known verb leaves isCommand false and starts the web
+// server, which is the same thing `dotnet run` with no arguments does.
+var isCommand = args is [CreateSuperUser.Verb or SeedEvents.Verb, ..];
 
 if (isCommand)
     builder.Logging.ClearProviders();
@@ -264,7 +267,18 @@ var app = builder.Build();
 
 // Returns an exit code and never starts the web server.
 if (isCommand)
-    return await CreateSuperUser.RunAsync(app.Services, args);
+    return args[0] switch
+    {
+        CreateSuperUser.Verb => await CreateSuperUser.RunAsync(app.Services, args),
+        SeedEvents.Verb => await SeedEvents.RunAsync(app.Services, args),
+
+        // Unreachable: isCommand already matched one of the two. The arm is
+        // here because a switch EXPRESSION must be exhaustive, which is the
+        // feature - add a third verb to SeedEvents' pattern above and forget
+        // it here, and this throws on the first run rather than silently
+        // starting a web server the user did not ask for.
+        _ => throw new InvalidOperationException($"Unhandled command verb '{args[0]}'."),
+    };
 
 
 // ===========================================================================

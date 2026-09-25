@@ -139,6 +139,36 @@ public class Profile : IAuditedEntity
     public DateTimeOffset Created { get; set; }
     public DateTimeOffset LastUpdate { get; set; }
 
+    // ---- events --------------------------------------------------------------
+    // Django gives you BOTH of these for free from the other side of the
+    // relationship, and names them itself:
+    //
+    //     profile.event_set          <- the events, via Event.participants
+    //     profile.eventparticipant_set  <- the enrolment rows
+    //
+    // EF names nothing for you. A reverse navigation exists only because it is
+    // declared, which is more typing and removes the "what is this attribute
+    // called again" question that related_name exists to answer.
+    //
+    // Both are empty until something loads them. .Include(p => p.Participations)
+    // or a projection; there is no lazy loading in this project and adding it
+    // is how you get an N+1 query you cannot see. Django has the same trap with
+    // the opposite default - it loads lazily unless you remember
+    // prefetch_related, so there the N+1 is what you get by accident.
+
+    /// <summary>This profile's enrolments, with their status and dates.</summary>
+    public ICollection<EventParticipant> Participations { get; set; } = [];
+
+    /// <summary>
+    /// The events themselves, skipping the join. Django: profile.event_set.
+    /// </summary>
+    /// <remarks>
+    /// The skip navigation that pairs with Event.Participants - see the
+    /// .UsingEntity call in EventConfiguration, which is what makes these two
+    /// collections one relationship instead of two.
+    /// </remarks>
+    public ICollection<Event> Events { get; set; } = [];
+
     // ---- convenience ---------------------------------------------------------
     // Django: a @property on the model, or a method decorated with @property.
     // Same idea; EF ignores read-only computed properties automatically because

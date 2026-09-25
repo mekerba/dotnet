@@ -60,6 +60,22 @@ public class ApplicationDbContext(DbContextOptions<ApplicationDbContext> options
     /// </remarks>
     public DbSet<Profile> Profiles => Set<Profile>();
 
+    /// <summary>Query root for events. Django: Event.objects</summary>
+    public DbSet<Event> Events => Set<Event>();
+
+    /// <summary>
+    /// Query root for the enrolment rows. Django: EventParticipant.objects
+    /// </summary>
+    /// <remarks>
+    /// A through model gets a manager in Django whether you want one or not,
+    /// and here a DbSet is equally optional: EventParticipant is reachable by
+    /// navigation from both Event and Profile, so EF would map it regardless.
+    /// It is declared because the enrolment endpoints query it directly -
+    /// "does this profile already have a row for this event" is a question
+    /// about the join, not about either end of it.
+    /// </remarks>
+    public DbSet<EventParticipant> EventParticipants => Set<EventParticipant>();
+
     protected override void OnModelCreating(ModelBuilder builder)
     {
         // Must come first: this is what creates the AspNet* entity mappings.
@@ -87,17 +103,19 @@ public class ApplicationDbContext(DbContextOptions<ApplicationDbContext> options
     // create Profile rows from here - that happens explicitly in
     // UserRegistrationService, for reasons noted there.
     // =======================================================================
-    public override Task<int> SaveChangesAsync(
+    public override async Task<int> SaveChangesAsync(
         bool acceptAllChangesOnSuccess,
         CancellationToken cancellationToken = default)
     {
         StampAuditedEntities();
-        return base.SaveChangesAsync(acceptAllChangesOnSuccess, cancellationToken);
+        await AssignEventCodesAsync(cancellationToken);
+        return await base.SaveChangesAsync(acceptAllChangesOnSuccess, cancellationToken);
     }
 
     public override int SaveChanges(bool acceptAllChangesOnSuccess)
     {
         StampAuditedEntities();
+        AssignEventCodes();
         return base.SaveChanges(acceptAllChangesOnSuccess);
     }
 
@@ -126,6 +144,118 @@ public class ApplicationDbContext(DbContextOptions<ApplicationDbContext> options
                     entry.Property(nameof(IAuditedEntity.Created)).IsModified = false;
                     break;
             }
+        }
+    }
+
+    // =======================================================================
+    // Event.code  —  Django's save() override, relocated.
+    //
+    // The Django model assigns its own code:
+    //
+    //     def save(self, *args, **kwargs):
+    //         if can_set_code and not self.code and self.start_date and self.type_id:
+    //             for _attempt in range(5):
+    //                 self.code = self._build_code()      # queries Event.objects
+    //                 try:
+    //                     with transaction.atomic():
+    //                         return super().save(*args, **kwargs)
+    //                 except IntegrityError:
+    //                     self.code = None
+    //
+    // It can do that because a Django model reaches its own manager, so
+    // _build_code() runs a query from inside the instance being saved. An EF
+    // entity has no such reach and should not be given one - so the rule lives
+    // here, in the one place that already intercepts every write, next to the
+    // auto_now stamping it is a sibling of.
+    //
+    // THREE DIFFERENCES FROM THE DJANGO VERSION, all deliberate:
+    //
+    //  * IT IS SET-BASED. Django saves one instance at a time, so it needs one
+    //    query per event. This runs once per (type, start-date) GROUP however
+    //    many events are being inserted, because SaveChanges sees the whole
+    //    batch at once. That is the unit-of-work paying for itself.
+    //
+    //  * THERE IS NO RETRY LOOP. Django re-queries and re-saves up to five
+    //    times on an IntegrityError, because two concurrent creates can pick
+    //    the same counter. Here the unique index on Code is the answer: the
+    //    losing insert throws DbUpdateException and the caller decides. Burying
+    //    a retry inside SaveChanges would mean silently re-running the caller's
+    //    entire unit of work, which is a much bigger thing to do behind their
+    //    back than Django's per-instance retry was.
+    //
+    //  * NOTHING IS RE-DERIVED. Both versions assign once and never touch an
+    //    existing code, so editing StartDate or Type after the fact does not
+    //    churn it. Django enforces that with `not self.code`; so does this.
+    // =======================================================================
+
+    /// <summary>
+    /// New events that still need a code, grouped by the TYPE-YYYYMMDD prefix
+    /// they will share.
+    /// </summary>
+    /// <remarks>
+    /// Added only. An event already in the database keeps the code it was born
+    /// with, even if someone has since moved its start date.
+    /// </remarks>
+    private List<IGrouping<string, Event>> PendingCodeGroups() =>
+        ChangeTracker.Entries<Event>()
+            .Where(e => e.State == EntityState.Added && string.IsNullOrEmpty(e.Entity.Code))
+            .Select(e => e.Entity)
+            .GroupBy(e => e.CodeBase)
+            .ToList();
+
+    private async Task AssignEventCodesAsync(CancellationToken ct)
+    {
+        foreach (var group in PendingCodeGroups())
+        {
+            // The codes this prefix has already handed out. StartsWith on an
+            // indexed column translates to a Postgres LIKE 'TRN-20260610-%',
+            // which the btree index on Code can serve.
+            var taken = await Events
+                .Where(e => e.Code != null && e.Code.StartsWith(group.Key))
+                .Select(e => e.Code!)
+                .ToListAsync(ct);
+
+            AssignWithin(group, taken);
+        }
+    }
+
+    /// <summary>
+    /// The synchronous twin, for callers that used SaveChanges.
+    /// </summary>
+    /// <remarks>
+    /// Duplicated rather than bridged with .GetAwaiter().GetResult(): blocking
+    /// on an async database call is how you deadlock a thread pool, and the
+    /// duplication is four lines. The shared part - which counter to pick - is
+    /// in AssignWithin, so the rule itself is written once.
+    /// </remarks>
+    private void AssignEventCodes()
+    {
+        foreach (var group in PendingCodeGroups())
+        {
+            var taken = Events
+                .Where(e => e.Code != null && e.Code.StartsWith(group.Key))
+                .Select(e => e.Code!)
+                .ToList();
+
+            AssignWithin(group, taken);
+        }
+    }
+
+    /// <summary>
+    /// Hands each event in one prefix group the lowest counter still free.
+    /// </summary>
+    /// <remarks>
+    /// `taken` grows as it goes, which is the part a per-instance save cannot
+    /// do: without it, three events created in one batch on the same day and
+    /// of the same type would all be handed -01 and two of them would lose to
+    /// the unique index.
+    /// </remarks>
+    private static void AssignWithin(IEnumerable<Event> group, List<string> taken)
+    {
+        foreach (var ev in group)
+        {
+            ev.Code = ev.BuildCode(taken);
+            taken.Add(ev.Code);
         }
     }
 }

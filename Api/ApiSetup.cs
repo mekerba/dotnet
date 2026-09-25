@@ -48,6 +48,7 @@ public static class ApiSetup
 
         api.MapAuthEndpoints();
         api.MapProfileEndpoints();
+        api.MapEventEndpoints();
 
         return app;
     }
